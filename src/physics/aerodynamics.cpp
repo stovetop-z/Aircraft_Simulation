@@ -20,22 +20,41 @@ namespace Aerodynamics
     {
         // Wind speed and angle of attack
         float u = state.vel[0];
-        float w = state.vel[1];
+        float w = state.vel[2];
 
         float v_sqr = (u * u) + (w * w);
-        float airspeed = std::sqrtf(v_sqr);
+        float as = std::sqrtf(v_sqr);
+        float airspeed = as <= 0.0 ? 0.00001 : as;
 
         float alpha = std::atan2f(w, u);
 
         float dynamic_pressure = 0.5f * AIR_DENSITY * v_sqr;
 
         // Lift and drag
-        float lift = dynamic_pressure * C_L(alpha) * WING_AREA;
-        float drag = dynamic_pressure * C_d(alpha) * WING_AREA;
+        float cl = C_L(alpha);
+        float lift = dynamic_pressure * cl * WING_AREA;
+        float drag = dynamic_pressure * C_d(cl) * WING_AREA;
         float thrust = controls.throttle * MAX_THRUST;
 
-        float Fx = thrust - drag * std::cosf(alpha) + lift * std::sinf(alpha);
-        float Fz = -drag * std::sin(alpha) - lift * std::cos(alpha) + (MASS * GRAVITY);
+        // 1. Calculate Forces strictly relative to the aircraft's body
+        // (Note: Gravity is removed from this step entirely)
+        float force_body_x = thrust - drag * std::cos(alpha) + lift * std::sin(alpha);
+        float force_body_y = 0.0f; // No side-slip wind force yet
+        float force_body_z = -drag * std::sin(alpha) - lift * std::cos(alpha); 
+
+        // =================================================================
+        // PHASE 2.5: QUATERNION ROTATION (Body Frame -> Earth Frame)
+        // =================================================================
+        float q0 = state.q.q0, q1 = state.q.q1, q2 = state.q.q2, q3 = state.q.q3;
+
+        // Convert Body Forces to Earth Forces using the Quaternion Rotation Matrix
+        float force_earth_x = (q0*q0 + q1*q1 - q2*q2 - q3*q3)*force_body_x + (2.0f*(q1*q2 - q0*q3))*force_body_y + (2.0f*(q1*q3 + q0*q2))*force_body_z;
+        float force_earth_y = (2.0f*(q1*q2 + q0*q3))*force_body_x + (q0*q0 - q1*q1 + q2*q2 - q3*q3)*force_body_y + (2.0f*(q2*q3 - q0*q1))*force_body_z;
+        float force_earth_z = (2.0f*(q1*q3 - q0*q2))*force_body_x + (2.0f*(q2*q3 + q0*q1))*force_body_y + (q0*q0 - q1*q1 - q2*q2 + q3*q3)*force_body_z;
+
+        // NOW we add gravity, because we are safely in the Earth's frame of reference
+        // (Assuming standard NED convention where +Z is pointing toward the ground)
+        force_earth_z += (MASS * GRAVITY);
 
         // Torques and moments
         float p = state.rates[0];
@@ -53,20 +72,19 @@ namespace Aerodynamics
 
 
         // Accelerations
-        
         d.d_pos[0] = state.vel[0];
         d.d_pos[1] = state.vel[1];
         d.d_pos[2] = state.vel[2];
 
-        d.d_vel[0] = Fx / MASS;
-        d.d_vel[1] = 0.0f; 
-        d.d_vel[2] = Fz / MASS;
+        // Apply our new Earth Frame forces
+        d.d_vel[0] = force_earth_x / MASS;
+        d.d_vel[1] = force_earth_y / MASS;
+        d.d_vel[2] = force_earth_z / MASS;
 
         d.d_rates[0] = (L_aero - (I_ZZ - I_YY) * q * r) / I_XX;
         d.d_rates[1] = (M_aero - (I_XX - I_ZZ) * p * r) / I_YY;
         d.d_rates[2] = (N_aero - (I_YY - I_XX) * p * q) / I_ZZ;
 
-        float q0 = state.q.q0, q1 = state.q.q1, q2 = state.q.q2, q3 = state.q.q3;
         d.d_q[0] = 0.5f * (-q1*p - q2*q - q3*r);
         d.d_q[1] = 0.5f * ( q0*p - q3*q + q2*r);
         d.d_q[2] = 0.5f * ( q3*p + q0*q - q1*r);

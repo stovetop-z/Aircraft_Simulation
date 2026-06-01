@@ -3,7 +3,7 @@
 
 namespace Aerodynamics
 {
-    constexpr float MAX_THRUST = 30.0f;
+    constexpr float MAX_THRUST = 500.0f;
     
     constexpr float MASS = 2.0f;
     constexpr float AIR_DENSITY = 1.225f;

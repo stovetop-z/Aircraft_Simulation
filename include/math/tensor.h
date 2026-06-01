@@ -2,7 +2,7 @@
 
 #include <cstddef>
 #include <arm_neon.h>
-#include "mem.h"
+#include "computation/mem.h"
 
 template<typename t>
 struct tensor 
